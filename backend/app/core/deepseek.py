@@ -132,8 +132,11 @@ async def stream_chat(
     messages: list[dict],
     persona: str = "deep_mirror",
     model: str = "deepseek-chat",
+    extra_context: str = "",
 ) -> AsyncGenerator[str, None]:
     system_prompt = _get_system_prompt(persona)
+    if extra_context:
+        system_prompt = system_prompt + "\n\n---\n\n" + extra_context
     full_messages = [{"role": "system", "content": system_prompt}] + messages
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:

@@ -46,7 +46,14 @@ MODEL_MAP = {
     Persona.SPOTLIGHT_ASK: "deepseek-chat",
 }
 
+TUTOR_UPGRADE_MODEL = "deepseek-chat"
+
 RESET_PATTERNS = ["随便聊聊", "喘口气", "不想聊这个了", "先这样吧", "换一个话题"]
+
+DEEP_QUESTION_PATTERNS = [
+    "为什么", "怎么导致的", "背后逻辑", "原理是什么", "深层原因",
+    "根本原因", "如何形成", "底层框架", "怎么推导", "逻辑链",
+]
 
 
 @dataclass
@@ -85,6 +92,23 @@ def _is_tutor_call(user_input: str) -> bool:
         "这是什么", "怎么回事", "帮我拆", "逐条解释",
     ]
     return _contains_any(user_input, tutor_patterns)
+
+
+def _is_deep_question(user_input: str) -> bool:
+    return _contains_any(user_input, DEEP_QUESTION_PATTERNS)
+
+
+def _count_consecutive_deep(conversation_context: list[dict]) -> int:
+    count = 0
+    for msg in reversed(conversation_context):
+        if msg.get("role") == "user":
+            if _is_deep_question(msg.get("content", "")):
+                count += 1
+            else:
+                break
+        elif msg.get("role") == "assistant" and msg.get("persona") != "spotlight_tutor":
+            break
+    return count
 
 
 def _is_igniter_handoff(user_input: str, conversation_context: list[dict]) -> bool:
@@ -149,6 +173,13 @@ def dispatch(
             return DispatchResult(persona=Persona.EXECUTOR)
         if _is_tutor_call(user_input):
             return DispatchResult(persona=Persona.SPOTLIGHT_TUTOR)
+        if _is_deep_question(user_input):
+            deep_count = _count_consecutive_deep(conversation_context) + 1
+            if deep_count >= 2:
+                return DispatchResult(
+                    persona=Persona.SPOTLIGHT_TUTOR,
+                    model=TUTOR_UPGRADE_MODEL,
+                )
         return DispatchResult(persona=Persona.DEEP_MIRROR)
 
     if current_state == UserState.USER:

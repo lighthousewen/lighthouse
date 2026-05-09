@@ -91,8 +91,12 @@ body {
 .message-persona {
   font-size: 11px;
   color: #888;
-  display: block;
+  display: inline-block;
   margin-bottom: 4px;
+  background: #333;
+  padding: 1px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
 }
 
 .streaming-indicator {

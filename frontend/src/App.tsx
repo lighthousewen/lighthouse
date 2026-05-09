@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import ChatWindow from "./components/ChatWindow";
-import { useSSE } from "./hooks/useSSE";
-import { createSession, getMessages, sendFeedback } from "./api/client";
+import { useSSE, type StreamChunk } from "./hooks/useSSE";
+import { createSession, sendFeedback } from "./api/client";
 
 interface Message {
   id: string;
@@ -14,6 +14,7 @@ export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const pendingMsgRef = useRef("");
+  const currentPersonaRef = useRef<string | undefined>(undefined);
   const { streaming, startStream } = useSSE();
 
   useEffect(() => {
@@ -33,6 +34,7 @@ export default function App() {
       };
       setMessages((prev) => [...prev, userMsg]);
       pendingMsgRef.current = "";
+      currentPersonaRef.current = undefined;
 
       const response = await fetch("/api/v1/chat", {
         method: "POST",
@@ -42,8 +44,11 @@ export default function App() {
 
       startStream(
         response,
-        (chunk) => {
-          pendingMsgRef.current += chunk;
+        (chunk: StreamChunk) => {
+          if (chunk.persona) {
+            currentPersonaRef.current = chunk.persona;
+          }
+          pendingMsgRef.current += chunk.content;
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (last?.role === "assistant") {
@@ -60,6 +65,7 @@ export default function App() {
                 id: crypto.randomUUID(),
                 role: "assistant",
                 content: pendingMsgRef.current,
+                persona: currentPersonaRef.current,
               },
             ];
           });
@@ -74,6 +80,7 @@ export default function App() {
                 id: crypto.randomUUID(),
                 role: "assistant",
                 content: pendingMsgRef.current,
+                persona: currentPersonaRef.current,
               },
             ];
           });
@@ -85,8 +92,12 @@ export default function App() {
 
   const handleFeedback = useCallback(async () => {
     if (!sessionId) return;
-    await sendFeedback(sessionId, "dispatch_mismatch");
-  }, [sessionId]);
+    const recentContext = messages
+      .slice(-4)
+      .map((m) => `[${m.role}]${m.persona ? `(${m.persona})` : ""}: ${m.content.slice(0, 100)}`)
+      .join("\n");
+    await sendFeedback(sessionId, "dispatch_mismatch", recentContext);
+  }, [sessionId, messages]);
 
   return (
     <ChatWindow

@@ -3,6 +3,12 @@ import { useState, useRef, useCallback } from "react";
 interface SSEMessage {
   content?: string;
   done?: boolean;
+  persona?: string;
+}
+
+export interface StreamChunk {
+  content: string;
+  persona?: string;
 }
 
 export function useSSE() {
@@ -12,7 +18,7 @@ export function useSSE() {
   const startStream = useCallback(
     async (
       response: Response,
-      onChunk: (text: string) => void,
+      onChunk: (chunk: StreamChunk) => void,
       onDone: (sessionId: string) => void
     ) => {
       setStreaming(true);
@@ -42,7 +48,7 @@ export function useSSE() {
               try {
                 const data: SSEMessage = JSON.parse(line.slice(6));
                 if (data.content) {
-                  onChunk(data.content);
+                  onChunk({ content: data.content, persona: data.persona });
                 }
                 if (data.done) {
                   onDone(sessionId);

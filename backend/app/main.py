@@ -4,6 +4,7 @@ from fastapi.responses import RedirectResponse
 from app.api.v1.chat import router as chat_router
 from app.api.v1.user import router as user_router
 from app.api.v1.log import router as log_router
+from app.api.v1.phase import router as phase_router
 from app.api.internal import router as internal_router
 
 app = FastAPI(
@@ -28,6 +29,7 @@ app.add_middleware(
 app.include_router(chat_router)
 app.include_router(user_router)
 app.include_router(log_router)
+app.include_router(phase_router)
 app.include_router(internal_router)
 
 

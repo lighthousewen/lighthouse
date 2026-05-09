@@ -41,7 +41,11 @@ export function sendMessage(
   } as any;
 }
 
-export async function sendFeedback(sessionId: string, feedbackType: string) {
+export async function sendFeedback(
+  sessionId: string,
+  feedbackType: string,
+  contextSnapshot?: string
+) {
   const res = await fetch(`${API_BASE}/api/v1/log/user`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -49,6 +53,7 @@ export async function sendFeedback(sessionId: string, feedbackType: string) {
       session_id: sessionId,
       type: "user_feedback",
       feedback_type: feedbackType,
+      context_snapshot: contextSnapshot,
     }),
   });
   return res.json();

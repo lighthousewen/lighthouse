@@ -10,6 +10,7 @@ from app.models import Session, Message
 from app.schemas.chat import ChatRequest, SessionOut, SessionCreateOut, MessageOut
 from app.core.deepseek import stream_chat
 from app.core.dispatch import dispatch, DispatchResult, Persona
+from app.core.phase_model import detect_phase, format_phase_context, PHASES
 
 router = APIRouter(prefix="/api/v1")
 
@@ -88,12 +89,25 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
         for m in conversation_context
     ]
 
+    extra_context = ""
+    market_keywords = [
+        "市场", "行情", "大盘", "仓位", "阶段", "牛市", "熊市", "震荡",
+        "恐慌", "抄底", "加仓", "减仓", "清仓", "持仓", "板块", "指数",
+        "涨", "跌", "回调", "反弹", "见底", "见顶", "三阶段", "估值",
+        "泡沫", "战争", "脱敏", "基本面", "信号不足", "仓位应该",
+    ]
+    if any(kw in body.message for kw in market_keywords):
+        signals = [body.message]
+        phase = detect_phase(signals)
+        extra_context = format_phase_context(phase)
+
     async def event_stream():
         full_response = ""
         try:
             async for content_chunk in stream_chat(
                 messages=messages_for_api,
                 persona=persona.value,
+                extra_context=extra_context,
             ):
                 full_response += content_chunk
                 yield f"data: {json.dumps({'content': content_chunk, 'persona': persona.value})}\n\n"
