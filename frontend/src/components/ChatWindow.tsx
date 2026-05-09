@@ -14,7 +14,7 @@ interface ChatWindowProps {
   messages: Message[];
   streaming: boolean;
   onSend: (message: string) => void;
-  onFeedback: () => void;
+  onFeedback: () => Promise<void>;
 }
 
 export default function ChatWindow({
