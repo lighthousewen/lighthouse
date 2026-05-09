@@ -1,23 +1,176 @@
 """
-面孔切换调度模块（Week 2 实现）。
+面孔切换状态机。
 
-DS-001 深筑负责：
-- 六状态定义：IDLE / IGNITER / DEEP_MIRROR / EXECUTOR / SPOTLIGHT_TUTOR / SPOTLIGHT_ASK
-- 四步试探法：镜面反射 → 原点提问 → 最小响应 → 校准信号
-- UNKNOWN_RAW → 前置判定 → UNKNOWN_ASSESSED 链路
+DS-001 深筑（技术经理）负责。
+
+六状态定义：
+  IDLE / IGNITER / DEEP_MIRROR / EXECUTOR / SPOTLIGHT_TUTOR / SPOTLIGHT_ASK
+
+状态转移链（MVP）：
+  IDLE → IGNITER（首次连接，UNKNOWN_RAW）
+  IGNITER → DEEP_MIRROR（引信线头被接住，UNKNOWN_ASSESSED）
+  DEEP_MIRROR → EXECUTOR / SPOTLIGHT_TUTOR（四步试探法完成，用户类型已识别）
+  任意非IDLE → IGNITER（"喘口气" / "随便聊聊"）
+
+注意：
+  - 前置判定三问由 FE/BE 协作完成（/api/v1/onboarding/assess），不在此状态机内。
+  - dispatch() 依据用户当前 state 决定 persona，不负责执行判定。
 """
 
-from typing import Dict, List, Any
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Optional
 
 
-async def dispatch(user_input: str, user_state: Dict[str, Any], conversation_context: List[Dict[str, Any]]) -> Dict[str, str]:
+class Persona(StrEnum):
+    IGNITER = "igniter"
+    DEEP_MIRROR = "deep_mirror"
+    EXECUTOR = "executor"
+    SPOTLIGHT_TUTOR = "spotlight_tutor"
+    SPOTLIGHT_ASK = "spotlight_ask"
+
+
+class UserState(StrEnum):
+    UNKNOWN_RAW = "UNKNOWN_RAW"
+    UNKNOWN_ASSESSED = "UNKNOWN_ASSESSED"
+    BUILDER = "BUILDER"
+    USER = "USER"
+    HYBRID = "HYBRID"
+
+
+MODEL_MAP = {
+    Persona.IGNITER: "deepseek-chat",
+    Persona.DEEP_MIRROR: "deepseek-chat",
+    Persona.EXECUTOR: "deepseek-chat",
+    Persona.SPOTLIGHT_TUTOR: "deepseek-chat",
+    Persona.SPOTLIGHT_ASK: "deepseek-chat",
+}
+
+RESET_PATTERNS = ["随便聊聊", "喘口气", "不想聊这个了", "先这样吧", "换一个话题"]
+
+
+@dataclass
+class DispatchResult:
+    persona: Persona
+    model: str = "deepseek-chat"
+    next_state: Optional[UserState] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "persona": self.persona.value,
+            "model": self.model,
+        }
+
+
+def _contains_any(text: str, patterns: list[str]) -> bool:
+    return any(p in text for p in patterns)
+
+
+def _is_reset(user_input: str) -> bool:
+    return _contains_any(user_input, RESET_PATTERNS)
+
+
+def _is_executor_call(user_input: str) -> bool:
+    exec_patterns = [
+        "帮我整理", "帮我萃取", "帮我建模", "帮我出摘要", "帮我做翻译",
+        "帮我分析", "帮我拉数据", "帮我查", "帮我看看",
+        "请整理", "请分析", "请萃取",
+    ]
+    return _contains_any(user_input, exec_patterns)
+
+
+def _is_tutor_call(user_input: str) -> bool:
+    tutor_patterns = [
+        "陪学模式", "陪我学", "教教我", "讲讲", "解释一下",
+        "这是什么", "怎么回事", "帮我拆", "逐条解释",
+    ]
+    return _contains_any(user_input, tutor_patterns)
+
+
+def _is_igniter_handoff(user_input: str, conversation_context: list[dict]) -> bool:
+    if not conversation_context:
+        return False
+    last_asst_msgs = [
+        m for m in conversation_context
+        if m.get("role") == "assistant"
+    ]
+    if not last_asst_msgs:
+        return False
+    last_persona_msgs = [
+        m for m in last_asst_msgs
+        if m.get("persona") == "igniter"
+    ]
+    return len(last_persona_msgs) > 0 and user_input.strip() != ""
+
+
+def dispatch(
+    user_input: str,
+    user_state: dict,
+    conversation_context: list[dict],
+) -> DispatchResult:
     """
-    POST /api/internal/dispatch 的内部实现。
+    面孔切换调度核心。
 
-    当前为骨架，第二周填充状态机逻辑。
+    Args:
+        user_input: 用户当前输入
+        user_state: {"type": "UNKNOWN_RAW", "step": 0, ...}
+        conversation_context: [{"role": "user"/"assistant", "content": "...", "persona": "..."}, ...]
     """
-    return {
-        "persona": "deep_mirror",
-        "system_prompt": "",
-        "model": "deepseek-chat",
-    }
+    current_state = user_state.get("type", UserState.UNKNOWN_RAW)
+
+    if _is_reset(user_input):
+        return DispatchResult(
+            persona=Persona.IGNITER,
+            next_state=UserState.UNKNOWN_RAW,
+        )
+
+    if current_state == UserState.UNKNOWN_RAW:
+        if _is_igniter_handoff(user_input, conversation_context):
+            return DispatchResult(
+                persona=Persona.DEEP_MIRROR,
+                next_state=UserState.UNKNOWN_ASSESSED,
+            )
+        return DispatchResult(persona=Persona.IGNITER)
+
+    if current_state == UserState.UNKNOWN_ASSESSED:
+        if _is_executor_call(user_input):
+            return DispatchResult(
+                persona=Persona.EXECUTOR,
+            )
+        return DispatchResult(persona=Persona.DEEP_MIRROR)
+
+    if current_state == UserState.BUILDER:
+        if _is_reset(user_input):
+            return DispatchResult(
+                persona=Persona.IGNITER,
+                next_state=UserState.UNKNOWN_RAW,
+            )
+        if _is_executor_call(user_input):
+            return DispatchResult(persona=Persona.EXECUTOR)
+        if _is_tutor_call(user_input):
+            return DispatchResult(persona=Persona.SPOTLIGHT_TUTOR)
+        return DispatchResult(persona=Persona.DEEP_MIRROR)
+
+    if current_state == UserState.USER:
+        if _is_reset(user_input):
+            return DispatchResult(
+                persona=Persona.IGNITER,
+                next_state=UserState.UNKNOWN_RAW,
+            )
+        if _is_executor_call(user_input):
+            return DispatchResult(persona=Persona.EXECUTOR)
+        return DispatchResult(persona=Persona.DEEP_MIRROR)
+
+    if current_state == UserState.HYBRID:
+        if _is_reset(user_input):
+            return DispatchResult(
+                persona=Persona.IGNITER,
+                next_state=UserState.UNKNOWN_RAW,
+            )
+        if _is_executor_call(user_input):
+            return DispatchResult(persona=Persona.EXECUTOR)
+        if _is_tutor_call(user_input):
+            return DispatchResult(persona=Persona.SPOTLIGHT_TUTOR)
+        return DispatchResult(persona=Persona.DEEP_MIRROR)
+
+    return DispatchResult(persona=Persona.DEEP_MIRROR)

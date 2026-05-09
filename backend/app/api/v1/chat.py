@@ -1,7 +1,7 @@
 import uuid
 import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import Session, Message
 from app.schemas.chat import ChatRequest, SessionOut, SessionCreateOut, MessageOut
 from app.core.deepseek import stream_chat
+from app.core.dispatch import dispatch, DispatchResult, Persona
 
 router = APIRouter(prefix="/api/v1")
 
@@ -54,6 +55,8 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
 
     session_id = session.id
 
+    user_state = {"type": session.state}
+
     user_msg = Message(session_id=session_id, role="user", content=body.message)
     db.add(user_msg)
     await db.flush()
@@ -65,9 +68,24 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
     )
     history = history_result.scalars().all()
 
-    messages_for_api = [
-        {"role": m.role, "content": m.content}
+    conversation_context = [
+        {"role": m.role, "content": m.content, "persona": m.persona}
         for m in history
+    ]
+
+    dispatch_result = dispatch(
+        user_input=body.message,
+        user_state=user_state,
+        conversation_context=conversation_context,
+    )
+    persona = dispatch_result.persona
+
+    if dispatch_result.next_state:
+        session.state = dispatch_result.next_state.value
+
+    messages_for_api = [
+        {"role": m["role"], "content": m["content"]}
+        for m in conversation_context
     ]
 
     async def event_stream():
@@ -75,24 +93,24 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
         try:
             async for content_chunk in stream_chat(
                 messages=messages_for_api,
-                persona="deep_mirror" if body.mode == "default" else "executor",
+                persona=persona.value,
             ):
                 full_response += content_chunk
-                yield f"data: {json.dumps({'content': content_chunk})}\n\n"
+                yield f"data: {json.dumps({'content': content_chunk, 'persona': persona.value})}\n\n"
         except Exception as e:
             error_msg = f"抱歉，我现在无法响应。错误：{str(e)}"
-            yield f"data: {json.dumps({'content': error_msg})}\n\n"
+            yield f"data: {json.dumps({'content': error_msg, 'persona': persona.value})}\n\n"
 
         assistant_msg = Message(
             session_id=session_id,
             role="assistant",
             content=full_response,
-            persona="deep_mirror" if body.mode == "default" else "executor",
+            persona=persona.value,
         )
         db.add(assistant_msg)
         await db.flush()
 
-        yield f"data: {json.dumps({'done': True})}\n\n"
+        yield f"data: {json.dumps({'done': True, 'persona': persona.value})}\n\n"
 
     return StreamingResponse(
         event_stream(),
