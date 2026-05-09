@@ -1,4 +1,4 @@
 【回滚锚点】
-本次改动前 commit：ddfe660dbb8f9a9a963e123259782aa8b3c3eade
-回滚命令：git reset --hard ddfe660dbb8f9a9a963e123259782aa8b3c3eade
+本次改动后 commit：1439cbb7d6d2408ec8b335ec3487b2419f464dce
+回滚命令：git reset --hard 1439cbb7d6d2408ec8b335ec3487b2419f464dce
 建议操作人：BE-001 程远

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from app.database import get_db
 from app.models import Session, Message, SessionSummary
 from app.schemas.chat import ChatRequest, SessionOut, SessionCreateOut, MessageOut
@@ -79,7 +79,12 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
     persona = dispatch_result.persona
 
     if dispatch_result.next_state:
-        session.state = dispatch_result.next_state.value
+        new_state = dispatch_result.next_state.value
+        await db.execute(
+            update(Session).where(Session.id == session_id).values(state=new_state)
+        )
+        await db.commit()
+        session.state = new_state
 
     messages_for_api = build_context_messages(summaries_context, recent_messages)
 
