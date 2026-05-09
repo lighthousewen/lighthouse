@@ -6,11 +6,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database import get_db
-from app.models import Session, Message
+from app.models import Session, Message, SessionSummary
 from app.schemas.chat import ChatRequest, SessionOut, SessionCreateOut, MessageOut
 from app.core.deepseek import stream_chat
 from app.core.dispatch import dispatch, DispatchResult, Persona
 from app.core.phase_model import detect_phase, format_phase_context, PHASES
+from app.core.memory_folding import fold_conversation, get_folded_context, build_context_messages
+from app.config import settings
 
 router = APIRouter(prefix="/api/v1")
 
@@ -39,7 +41,10 @@ async def archive_session(session_id: uuid.UUID, db: AsyncSession = Depends(get_
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     session.archived_at = datetime.now(timezone.utc)
-    return {"status": "archived"}
+
+    await fold_conversation(session_id, db, max_messages=10, fold_batch=999)
+
+    return {"status": "archived", "folded": True}
 
 
 @router.post("/chat")
@@ -62,32 +67,21 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
     db.add(user_msg)
     await db.flush()
 
-    history_result = await db.execute(
-        select(Message)
-        .where(Message.session_id == session_id)
-        .order_by(Message.created_at)
+    summaries_context, recent_messages = await get_folded_context(
+        session_id, db, recent_count=20
     )
-    history = history_result.scalars().all()
-
-    conversation_context = [
-        {"role": m.role, "content": m.content, "persona": m.persona}
-        for m in history
-    ]
 
     dispatch_result = dispatch(
         user_input=body.message,
         user_state=user_state,
-        conversation_context=conversation_context,
+        conversation_context=recent_messages + [{"role": "user", "content": body.message}],
     )
     persona = dispatch_result.persona
 
     if dispatch_result.next_state:
         session.state = dispatch_result.next_state.value
 
-    messages_for_api = [
-        {"role": m["role"], "content": m["content"]}
-        for m in conversation_context
-    ]
+    messages_for_api = build_context_messages(summaries_context, recent_messages)
 
     extra_context = ""
     market_keywords = [
@@ -124,6 +118,13 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
         db.add(assistant_msg)
         await db.flush()
 
+        msg_count_result = await db.execute(
+            select(Message).where(Message.session_id == session_id)
+        )
+        msg_count = len(msg_count_result.scalars().all())
+        if msg_count > settings.max_context_messages:
+            await fold_conversation(session_id, db)
+
         yield f"data: {json.dumps({'done': True, 'persona': persona.value})}\n\n"
 
     return StreamingResponse(
@@ -145,3 +146,28 @@ async def get_messages(session_id: uuid.UUID, db: AsyncSession = Depends(get_db)
         .order_by(Message.created_at)
     )
     return result.scalars().all()
+
+
+@router.post("/sessions/{session_id}/fold")
+async def manual_fold(session_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    folded = await fold_conversation(session_id, db, max_messages=0, fold_batch=999)
+
+    summaries_result = await db.execute(
+        select(SessionSummary)
+        .where(SessionSummary.session_id == session_id)
+        .order_by(SessionSummary.created_at)
+    )
+    summaries = summaries_result.scalars().all()
+
+    return {
+        "status": "folded" if folded else "no_messages_to_fold",
+        "summaries": [
+            {"id": str(s.id), "summary_text": s.summary_text[:100], "message_count": s.message_count}
+            for s in summaries
+        ],
+    }

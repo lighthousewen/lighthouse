@@ -1,8 +1,8 @@
 # 测试路径 - 2026年05月09日
 
 ## 测试环境准备
-- 后端服务运行中：http://localhost:8000
-- PostgreSQL 数据库运行中，`sessions`、`messages`、`user_profiles`、`assessment_answers`、`logs` 五张表已建
+- 后端服务运行中：http://localhost:8000（Python 3.13 / FastAPI）
+- PostgreSQL 数据库运行中，`sessions`、`messages`、`user_profiles`、`assessment_answers`、`logs`、`session_summaries` 六张表已建
 - `.env` 中 `DEEPSEEK_API_KEY` 已配置真实 Key
 
 ---
@@ -77,14 +77,31 @@
 **预期：** 数据已写入对应表中
 **结果：** ✅ 通过 — 所有表数据完整
 
+## 用例15：记忆折叠 — 手动折叠
+**步骤：** `POST /api/v1/sessions/{id}/fold`
+**预期：** 返回 folded 状态 + summaries 列表，消息从 messages 表转移到 session_summaries 表
+**结果：** ✅ 通过 — 消息清理、摘要生成、摘要入库均正常
+
+## 用例16：记忆折叠 — 归档折叠
+**步骤：** `POST /api/v1/sessions/{id}/archive`
+**预期：** 归档成功 + folded=true
+**结果：** ✅ 通过
+
+## 用例17：记忆折叠 — 上下文注入（端到端）
+**步骤：** 发送聊天消息 → 手动折叠 → 再次发送消息
+**预期：** 第二次对话中，AI 能引用折叠前的对话内容（通过摘要恢复认知连续性）
+**结果：** ✅ 通过 — 摘要内容包含先前对话的核心议题
+
 ---
 
 ## 自测结论
 
 | 项目 | 结果 |
 |:---|:---:|
-| 总用例数 | 14 |
-| 通过 | **14** |
+| 总用例数 | 17 |
+| 通过 | **17** |
 | 失败 | **0** |
 
-**备注：** 自测过程中发现 `event_stream` 中 `db.flush()` 在 `yield done` 之后执行可能导致持久化不完整，已修复（flush 移到 yield 之前）。
+**备注：**
+- 自测过程中发现 `event_stream` 中 `db.flush()` 在 `yield done` 之后执行可能导致持久化不完整，已修复（flush 移到 yield 之前）
+- 记忆折叠摘要由 DeepSeek 调用生成，网络不稳定时可能超时，设计了 fallback 文案「日常交流，无显著认知增量」

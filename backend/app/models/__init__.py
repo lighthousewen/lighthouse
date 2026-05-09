@@ -73,3 +73,14 @@ class Log(Base):
     content: Mapped[dict] = mapped_column(JSONB, default=dict)
     context_snapshot: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SessionSummary(Base):
+    __tablename__ = "session_summaries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"), index=True)
+    summary_text: Mapped[str] = mapped_column(Text)
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    fold_type: Mapped[str] = mapped_column(String(20), default="auto")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

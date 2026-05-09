@@ -44,9 +44,19 @@ CREATE TABLE IF NOT EXISTS logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS session_summaries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    summary_text TEXT NOT NULL,
+    message_count INT NOT NULL DEFAULT 0,
+    fold_type VARCHAR(20) NOT NULL DEFAULT 'auto' CHECK (fold_type IN ('auto', 'manual')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_logs_session_id ON logs(session_id);
 CREATE INDEX IF NOT EXISTS idx_logs_type ON logs(log_type);
 CREATE INDEX IF NOT EXISTS idx_assessment_answers_user_id ON assessment_answers(user_id);
+CREATE INDEX IF NOT EXISTS idx_summaries_session_id ON session_summaries(session_id);
