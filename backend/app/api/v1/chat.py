@@ -1,25 +1,42 @@
 import uuid
 import json
 from datetime import datetime, timezone
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from app.database import get_db
 from app.models import Session, Message, SessionSummary
+from app.models import UserProfile
 from app.schemas.chat import ChatRequest, SessionOut, SessionCreateOut, MessageOut
 from app.core.deepseek import stream_chat
 from app.core.dispatch import dispatch, DispatchResult, Persona
 from app.core.phase_model import detect_phase, format_phase_context, PHASES
 from app.core.memory_folding import fold_conversation, get_folded_context, build_context_messages
 from app.config import settings
+from pydantic import BaseModel
+
+
+class CreateSessionRequest(BaseModel):
+    user_id: Optional[str] = None
 
 router = APIRouter(prefix="/api/v1")
 
 
 @router.post("/sessions", response_model=SessionCreateOut)
-async def create_session(db: AsyncSession = Depends(get_db)):
-    session = Session()
+async def create_session(body: CreateSessionRequest = CreateSessionRequest(), db: AsyncSession = Depends(get_db)):
+    inherited_state = "UNKNOWN_RAW"
+
+    if body.user_id:
+        profile_result = await db.execute(
+            select(UserProfile).where(UserProfile.user_id == body.user_id)
+        )
+        profile = profile_result.scalar_one_or_none()
+        if profile:
+            inherited_state = "UNKNOWN_ASSESSED"
+
+    session = Session(user_id=body.user_id, state=inherited_state)
     db.add(session)
     await db.flush()
     return SessionCreateOut(session_id=session.id, state=session.state)

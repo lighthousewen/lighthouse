@@ -1,7 +1,12 @@
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
-export async function createSession() {
-  const res = await fetch(`${API_BASE}/api/v1/sessions`, { method: "POST" });
+export async function createSession(userId?: string) {
+  const body = userId ? JSON.stringify({ user_id: userId }) : undefined;
+  const res = await fetch(`${API_BASE}/api/v1/sessions`, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body,
+  });
   if (!res.ok) throw new Error("Failed to create session");
   return res.json();
 }

@@ -111,6 +111,13 @@ def _count_consecutive_deep(conversation_context: list[dict]) -> int:
     return count
 
 
+def _get_last_persona(conversation_context: list[dict]) -> Optional[str]:
+    for msg in reversed(conversation_context):
+        if msg.get("role") == "assistant":
+            return msg.get("persona")
+    return None
+
+
 def _is_igniter_handoff(user_input: str, conversation_context: list[dict]) -> bool:
     if not conversation_context:
         return False
@@ -161,6 +168,9 @@ def dispatch(
             return DispatchResult(
                 persona=Persona.EXECUTOR,
             )
+        last_p = _get_last_persona(conversation_context)
+        if last_p and last_p in ("executor", "spotlight_tutor", "spotlight_ask"):
+            return DispatchResult(persona=Persona(last_p))
         return DispatchResult(persona=Persona.DEEP_MIRROR)
 
     if current_state == UserState.BUILDER:
@@ -180,6 +190,9 @@ def dispatch(
                     persona=Persona.SPOTLIGHT_TUTOR,
                     model=TUTOR_UPGRADE_MODEL,
                 )
+        last_p = _get_last_persona(conversation_context)
+        if last_p and last_p in ("executor", "spotlight_tutor", "spotlight_ask"):
+            return DispatchResult(persona=Persona(last_p))
         return DispatchResult(persona=Persona.DEEP_MIRROR)
 
     if current_state == UserState.USER:
@@ -190,6 +203,9 @@ def dispatch(
             )
         if _is_executor_call(user_input):
             return DispatchResult(persona=Persona.EXECUTOR)
+        last_p = _get_last_persona(conversation_context)
+        if last_p and last_p in ("executor", "spotlight_tutor", "spotlight_ask"):
+            return DispatchResult(persona=Persona(last_p))
         return DispatchResult(persona=Persona.DEEP_MIRROR)
 
     if current_state == UserState.HYBRID:
@@ -202,6 +218,9 @@ def dispatch(
             return DispatchResult(persona=Persona.EXECUTOR)
         if _is_tutor_call(user_input):
             return DispatchResult(persona=Persona.SPOTLIGHT_TUTOR)
+        last_p = _get_last_persona(conversation_context)
+        if last_p and last_p in ("executor", "spotlight_tutor", "spotlight_ask"):
+            return DispatchResult(persona=Persona(last_p))
         return DispatchResult(persona=Persona.DEEP_MIRROR)
 
     return DispatchResult(persona=Persona.DEEP_MIRROR)

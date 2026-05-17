@@ -18,7 +18,12 @@ export default function App() {
   const { streaming, startStream } = useSSE();
 
   useEffect(() => {
-    createSession().then((data) => {
+    let userId = localStorage.getItem("lighthouse_user_id");
+    if (!userId) {
+      userId = crypto.randomUUID();
+      localStorage.setItem("lighthouse_user_id", userId);
+    }
+    createSession(userId).then((data) => {
       setSessionId(data.session_id);
     });
   }, []);
